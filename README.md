@@ -1,7 +1,7 @@
 
 # event_push_mobile_sse
 
-Private version of the event_push mobile application.  Only the Server-sent
+A public version of the event_push mobile application.  Only the Server-sent
 Event (SSE) style is supported.
 
 ## Getting Started
