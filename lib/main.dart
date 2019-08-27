@@ -2,6 +2,7 @@
 import 'package:eventsource/eventsource.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:http/http.dart' as http;
 import 'package:keyboard_visibility/keyboard_visibility.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -45,6 +46,12 @@ class PushApp extends StatelessWidget {
   final int websocket = 0;
   final int sse = 1;
   final int longpoll = 2;
+
+  //
+  // ui_version = 0 original
+  // us_version = 1 UI redesign 2019
+  //
+  final int ui_version = 1;
 
   SharedPreferences _prefs;
 
@@ -92,6 +99,13 @@ class PushApp extends StatelessWidget {
     _mockPingInterval = Duration(seconds: seconds ~/3);
   }
 
+  /*
+  Future<String> getChannelURL() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    return await prefs.getString(_urlPrefs) ?? 'https://0.0.0.0:443';
+  }
+  */
+
   void _startup() async {
     //
     // perform the startup asynchronously to allow for access to storage
@@ -124,7 +138,13 @@ class PushApp extends StatelessWidget {
     //
     // bring back stored URL
     //
-    _channelURL = await _prefs.getString(_urlPrefs);
+
+    if (_channelURL == null) {
+      _channelURL = await _prefs.getString(_urlPrefs);
+    }
+
+    //print('startup');
+    //print(_channelURL);
 
     //
     // if already configured, start connection
@@ -171,6 +191,12 @@ class PushApp extends StatelessWidget {
 
     _onRESTMessage('subscriber_request=CHANNELS' + '&subscriber_id=' + _subscriberId);
 
+    /*
+    //-----
+     */
+    //_channelURL = await getChannelURL();
+    //print('init SSE');
+    //print(_channelURL);
     sseClient = await EventSource.connect(_channelURL + '/' + _subscriberId);
     sseClient.listen(_onSseMessage);
 
@@ -263,8 +289,14 @@ class PushApp extends StatelessWidget {
   void _onRESTMessage(String aQuery) async {
     http.Response response;
     try {
+
+      //print('onRERTMessage');
+      //print(aQuery);
+      //print(_channelURL);
       response = await http.get(_channelURL + '?' + aQuery);
       if (response.body != '') {
+        //print('there');
+        //print(response.body);
         Map im = _decodeMessage(response.body);
         //
         // Before a side channel (SSE or Long Poll) is open, a "close" is sent
@@ -364,6 +396,7 @@ class PushApp extends StatelessWidget {
             _lastActivity = now;
             final response = await http.get('https://' + getHost() + ':' + getPort() + '/mock_ping?subscriber_id=' + _subscriberId);
             if (response.statusCode == 200) {
+              //print(response.body);
               if ( response.body == 'mock_pong') {
                 _startActivityTimer();
               } else {
@@ -395,7 +428,8 @@ class PushApp extends StatelessWidget {
               im['timestamp'],
               im['message_id'],
               im['text'],
-              '');
+              '',
+            ui_version);
         _displayMessage(anItem);
         break;
 
@@ -405,7 +439,8 @@ class PushApp extends StatelessWidget {
               im['timestamp'],
               im['message_id'],
               im['event_context'],
-              im['event_link']);
+              im['event_link'],
+            ui_version);
         _displayMessage(anItem);
         break;
 
@@ -415,7 +450,8 @@ class PushApp extends StatelessWidget {
               im['timestamp'],
               im['message_id'],
               im['event_context'],
-              im['event_link']);
+              im['event_link'],
+            ui_version);
         _displayMessage(anItem);
         break;
 
@@ -425,7 +461,8 @@ class PushApp extends StatelessWidget {
               im['timestamp'],
               im['message_id'],
               im['event_context'],
-              im['event_link']);
+              im['event_link'],
+            ui_version);
         _displayMessage(anItem);
         break;
 
@@ -555,6 +592,20 @@ class PushApp extends StatelessWidget {
     return Uri.parse(_channelURL).scheme;
   }
 
+  int getUiVersion() {
+    return ui_version;
+  }
+
+  void showLineup() {
+    print(_channelLineup);
+    print(_currentChannel);
+
+    if (_subscriberId != null) {
+      _connectionClosed(1005);
+      _onRESTMessage('subscriber_request=SIDE-CHANNEL-CLOSE&subscriber_id=' + _subscriberId);
+    }
+  }
+
   void upChannel() {
     var nextChannel = '';
     var found = false;
@@ -627,6 +678,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   String _name = "";
   String _password = "";
   int _port = 433;
+  int _ui_version = 0;
 
   _MessagePageState(PushApp aParent) {
 
@@ -650,6 +702,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       },
     );
     aParent.registerMessageState(this);
+    _ui_version = aParent.getUiVersion();
   }
 
   /*
@@ -813,12 +866,14 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     // ERROR Screen
       case 0:
-        return new Scaffold(
-          appBar: new AppBar(
+        return Scaffold(
+          appBar: AppBar(
             centerTitle: true,
             backgroundColor: Colors.deepPurple,
             actions: <Widget>[
-              IconButton(icon: Icon(Icons.more_vert), onPressed: () {
+              IconButton(icon: const Icon(Icons.more_vert),
+                tooltip: 'Retry',
+                onPressed: () {
                 widget.parent.suspend();
                 setConnectionState(3);
                 this.rebuild();
@@ -846,14 +901,14 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               preferredSize: Size(0.0, 20.0),
             ),
           ),
-          body: new Column(
+          body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              new Padding(
+              Padding(
                 padding: const EdgeInsets.only(top: 60.0),
-                child: new Text(
+                child: Text(
                   'Looking for a Connection',
-                  style: new TextStyle(
+                  style: TextStyle(
                     fontSize: 18.00,
                     fontWeight: FontWeight.bold,
                     color: Colors.deepPurpleAccent,
@@ -861,11 +916,11 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                   textAlign: TextAlign.center,
                 ),
               ),
-              new Padding(
+              Padding(
                 padding: const EdgeInsets.only(left: 36.0, top: 18.0, bottom: 12.0),
-                child: new Text(
+                child: Text(
                   'Some of the reasons for this could be:',
-                  style: new TextStyle(fontSize: 14.00,),
+                  style: TextStyle(fontSize: 14.00,),
                   textAlign: TextAlign.left,
                 ),
               ),
@@ -873,19 +928,19 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               _bulletLine('Login detected from another device'),
               _bulletLine('Service is temporarily down'),
               _bulletLine('Initial configuration not complete'),
-              new Padding(
+              Padding(
                 padding: const EdgeInsets.only(left: 36.0, top: 18.0),
-                child: new Text(
+                child: Text(
                   'A connection will be made when possible.',
-                  style: new TextStyle(fontSize: 14.00,),
+                  style: TextStyle(fontSize: 14.00,),
                   textAlign: TextAlign.left,
                 ),
               ),
-              new Padding(
+              Padding(
                 padding: const EdgeInsets.only(top: 20.0),
-                child: new Text(
+                child: Text(
                   'Please be Patient',
-                  style: new TextStyle(
+                  style: TextStyle(
                     fontSize: 18.00,
                     fontWeight: FontWeight.bold,
                     color: Colors.deepPurpleAccent,
@@ -893,12 +948,12 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                   textAlign: TextAlign.center,
                 ),
               ),
-              new Padding(
+              Padding(
                   padding: const EdgeInsets.only(left: 36.0, top: 50.0, right: 36.0),
                   child: RichText(
                     text: TextSpan(
                       text: 'First time note: ',
-                      style: new TextStyle(
+                      style: TextStyle(
                         fontSize: 14.00,
                         fontWeight: FontWeight.bold,
                         color: Colors.black,
@@ -906,7 +961,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                       children: <TextSpan> [
                         TextSpan(
                           text: 'Configure the service using the icon in the upper right hand corner.',
-                          style: new TextStyle(
+                          style: TextStyle(
                             fontSize: 14.00,
                             fontWeight: FontWeight.normal,
                             color: Colors.black,
@@ -949,27 +1004,27 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                 preferredSize: Size(0.0, 20.0),
               ),
             ),
-            body: new Container(
+            body: Container(
               padding: EdgeInsets.only(top: 20.0, left: 24.0, right: 24.0),
-              child: new Column(
+              child: Column(
                 children: <Widget>[
-                  new Column(
+                  Column(
                     children: <Widget> [
-                      new TextField(
+                      TextField(
                         controller: _nameFilter,
-                        decoration: new InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Name',
-                          labelStyle: new TextStyle(
+                          labelStyle: TextStyle(
                             color: Colors.deepPurple,
                             fontSize: 20.0,
                           ),
                         ),
                       ),
-                      new TextField(
+                      TextField(
                         controller: _passwordFilter,
-                        decoration: new InputDecoration(
+                        decoration: InputDecoration(
                           labelText: 'Password',
-                          labelStyle: new TextStyle(
+                          labelStyle: TextStyle(
                             color: Colors.deepPurple,
                             fontSize: 20.0,
                           ),
@@ -987,17 +1042,18 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     // MESSAGES Screen
       case 2:
-        List aList = new List<Widget>();
+        List aList = List<Widget>();
         for (var i = 0; i < widget.channelItems.length; i++) {
-          aList.add(
-              new Container (
-                  decoration: new BoxDecoration (
+          if (_ui_version == 0) {
+            aList.add(
+                Container (
+                  decoration: BoxDecoration (
                     color: widget.channelItems[i].asBackroundColor(),
                   ),
-                  child:
-                  ListTile(
+                  child: ListTile(
                     leading: IconButton(
                       padding: const EdgeInsets.all(0.0),
+                      tooltip: 'Details',
                       //iconSize: 20,
                       icon: Icon(
                         widget.channelItems[i].asIcon(),
@@ -1005,9 +1061,15 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                       ),
                       onPressed: () {
                         _launchURL(widget.channelItems[i].asLink());
-                        },
+                      },
                     ),
-                    subtitle: Text(widget.channelItems[i].asMessageId(),
+                    subtitle: Row(
+                      children: <Widget>[
+                        Text(widget.channelItems[i].asHint(),
+                        ),
+                        Text(widget.channelItems[i].asMessageId(),
+                        ),
+                      ],
                     ),
                     title: Text(widget.channelItems[i].asString(),
                     ),
@@ -1016,16 +1078,89 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                     dense: true,
                     //trailing: Text(f.format(new DateTime.now())),
                   )
-              )
-          );
+                ));
+            }
+
+            if (_ui_version == 1) {
+              aList.add(Container(
+                padding: EdgeInsets.symmetric(vertical: 12.0, horizontal: 0.0),
+                margin: EdgeInsets.symmetric(vertical: 0.0),
+                decoration: BoxDecoration(
+                  color: widget.channelItems[i].asBackroundColor(),
+                  borderRadius: BorderRadius.circular(6.0),
+                  border: Border.all(color: Colors.purple[50]),
+                ),
+                child: Column(
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        IconButton(
+                          tooltip: 'Details',
+                          iconSize: 30,
+                          icon: Icon(
+                            widget.channelItems[i].asIcon(),
+                            color: widget.channelItems[i].asIconColor(),),
+                            onPressed: () =>
+                            {
+                              _launchURL(widget.channelItems[i].asLink())
+                            },
+                          ),
+                        Expanded(
+                          child: Container(
+                            margin: EdgeInsets.symmetric(horizontal: 6.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  widget.channelItems[i].asString(),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 15.0,
+                                  ),
+                                ),
+                                Text(
+                                  '',
+                                  style: TextStyle(
+                                    fontSize: 6.0,
+                                  ),
+                                ),
+                                Row(
+                                  children: <Widget>[
+                                    Text(
+                                      widget.channelItems[i].asHint(),
+                                      style: TextStyle(
+                                        color: widget.channelItems[i]
+                                            .asIconColor(),
+                                        fontSize: 16.0,
+                                      ),
+                                    ),
+                                    Text(
+                                      widget.channelItems[i].asMessageId(),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ));
+          }
+
         }
+
         return Scaffold(
           appBar: AppBar(
             centerTitle: true,
             backgroundColor: Colors.deepPurple,
             leading: IconButton(
-                icon: Icon(Icons.refresh),
-                onPressed: widget.parent.disconnect
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Refresh',
+                onPressed: widget.parent.disconnect,
             ),
             title: Text(widget.title,
               style: TextStyle(
@@ -1034,6 +1169,16 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                 fontSize: 20.0,
               ),
             ),
+
+            actions: <Widget>[
+                IconButton(
+                  icon: const Icon(Icons.more_vert),
+                    tooltip: 'Channel Guide',
+                    onPressed: widget.parent.showLineup,
+                ),
+
+                ],
+
             bottom:
             PreferredSize(
               child: Padding(
@@ -1043,7 +1188,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: <Widget>[
                         IconButton(
-                            icon: Icon(Icons.keyboard_arrow_left),
+                            tooltip: 'Down',
+                            icon: const Icon(Icons.keyboard_arrow_left),
                             color: Colors.white,
                             onPressed: widget.parent.downChannel
                         ),
@@ -1061,7 +1207,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                             )
                         ),
                         IconButton(
-                            icon: Icon(Icons.keyboard_arrow_right),
+                            tooltip: 'Up',
+                            icon: const Icon(Icons.keyboard_arrow_right),
                             color: Colors.white,
                             onPressed: widget.parent.upChannel
                         ),
@@ -1086,7 +1233,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               shrinkWrap: true,
               slivers: <Widget>[
                 SliverPadding(
-                  padding: const EdgeInsets.all(14.0),
+                  padding: const EdgeInsets.all(0.0),
                   sliver: SliverList(
                     delegate: SliverChildListDelegate(
                       aList,
@@ -1138,24 +1285,24 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
           ),
           body: Padding(
             padding: EdgeInsets.only(top: 20.0, left: 24.0, right: 24.0),
-            child: new Column(
+            child: Column(
               children: <Widget>[
 
-                new TextField(
+                TextField(
                   controller: _hostFilter,
-                  decoration: new InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Host',
-                    labelStyle: new TextStyle(
+                    labelStyle: TextStyle(
                       color: Colors.deepPurple,
                       fontSize: 22.0,
                     ),
                   ),
                 ),
-                new TextField(
+                TextField(
                   controller: _portFilter,
-                  decoration: new InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Port',
-                    labelStyle: new TextStyle(
+                    labelStyle: TextStyle(
                       color: Colors.deepPurple,
                       fontSize: 22.0,
                     ),
@@ -1183,15 +1330,20 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 //
 class ChannelItem {
   IconData _anIcon;
+  String _hint;
   String _eventLink;
   String _description;
   Color _anIconColor;
   Color _backgroundColor;
   String _messageId;
 
-  ChannelItem(String msgType, String timestamp, int anId, String rawInput, String aLink) {
+  //
+  // ui_version = 0 original
+  // ui_version = 1 UI redesign 2019
+  //
+  ChannelItem(String msgType, String timestamp, int anId, String rawInput, String aLink, int ui_version) {
     if (anId != 0) {
-      _messageId = 'message ' + anId.toString() + ' sent at ' + timestamp;
+      _messageId = anId.toString() + ' sent at ' + timestamp;
     } else {
       _messageId = 'sent at ' + timestamp;
     }
@@ -1202,29 +1354,56 @@ class ChannelItem {
       case 'MESSAGE':
         {
           _anIcon = Icons.message;
-          _anIconColor = Colors.orange;
+          if (ui_version == 0) {
+            _anIconColor = Colors.orange;
+          }
+          if (ui_version == 1) {
+            _anIconColor = Colors.purple[800];
+          }
           _backgroundColor = Colors.amber[50];
+          _hint = 'message ';
         }
         break;
 
       case 'OFF-MARKET':
         {
           _anIcon = Icons.block;
-          _anIconColor = Colors.blue;
+          if (ui_version == 0) {
+            _anIconColor = Colors.blue;
+            _hint = 'message ';
+          }
+          if (ui_version == 1) {
+            _anIconColor = Colors.red;
+            _hint = 'closed ';
+          }
         }
         break;
 
       case 'ON-MARKET':
         {
           _anIcon = Icons.add;
-          _anIconColor = Colors.green;
+          if (ui_version == 0) {
+            _anIconColor = Colors.green;
+            _hint = 'message ';
+          }
+          if (ui_version == 1) {
+            _anIconColor = Colors.green[700];
+            _hint = 'new ';
+          }
         }
         break;
 
       case 'PRICE-DROP':
         {
           _anIcon = Icons.change_history;
-          _anIconColor = Colors.orange;
+          if (ui_version == 0) {
+            _anIconColor = Colors.orange;
+            _hint = 'message ';
+          }
+          if (ui_version == 1) {
+            _anIconColor = Colors.blue[700];
+            _hint = 'change ';
+          }
         }
         break;
 
@@ -1246,6 +1425,10 @@ class ChannelItem {
 
   Color asBackroundColor() {
     return _backgroundColor;
+  }
+
+  String asHint() {
+    return _hint;
   }
 
   String asLink() {
