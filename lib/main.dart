@@ -42,6 +42,7 @@ class PushApp extends StatelessWidget {
   final int awaitingLogin = 1;
   final int loggedIn = 2;
   final int preferences = 3;
+  final int channelGuide = 4;
 
   final int websocket = 0;
   final int sse = 1;
@@ -218,9 +219,13 @@ class PushApp extends StatelessWidget {
     _channelLineup = new LinkedHashMap();
     for (var i = 0; i < channels.length; i++) {
       Map<String, dynamic> aChannel = channels[i];
-      _channelLineup[aChannel['channel_number']] = aChannel['channel_description'];
+      print(aChannel);
+      _channelLineup[aChannel['channel_number']] = {
+        'description': aChannel['channel_description'],
+        'detail': aChannel['channel_detail']
+      };
     }
-    messageState.setChannelDescription(_channelLineup[_currentChannel]);
+    messageState.setChannelDescription(_channelLineup[_currentChannel]['description']);
     messageState.rebuild();
 
     if (_currentChannel != _lastChannel) {
@@ -515,9 +520,7 @@ class PushApp extends StatelessWidget {
   // public methods
   //
 
-
   void changeAppLifecycle(AppLifecycleState state) {
-
     print('STATE CHANGE: ' + state.toString());
     if (state.index == 0) {
       if (!_activeChannel) {
@@ -525,7 +528,6 @@ class PushApp extends StatelessWidget {
       }
     }
   }
-
 
   void suspend() {
     _restartFlag = false;
@@ -596,14 +598,28 @@ class PushApp extends StatelessWidget {
     return ui_version;
   }
 
-  void showLineup() {
-    print(_channelLineup);
-    print(_currentChannel);
+  String getCurrentChannel() {
+    return _currentChannel;
+  }
 
-    if (_subscriberId != null) {
-      _connectionClosed(1005);
-      _onRESTMessage('subscriber_request=SIDE-CHANNEL-CLOSE&subscriber_id=' + _subscriberId);
+  void selectChannel(String aChannel) {
+    print(_currentChannel);
+    if (aChannel != '') {
+      _clearLastMessage();
+      channelItems = List<ChannelItem>();
+      messageState.setChannelItems(channelItems);
+      _onRESTMessage('subscriber_request=CHANGE-CHANNEL&subscriber_id=' +
+          _subscriberId + '&channel_number=' + aChannel);
     }
+  }
+
+  void showGuide() {
+    messageState.setConnectionState(channelGuide);
+    messageState.rebuild();
+  }
+
+  LinkedHashMap getChannelLineup() {
+    return _channelLineup;
   }
 
   void upChannel() {
@@ -846,7 +862,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   }
   */
 
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     widget.parent.changeAppLifecycle(state);
@@ -857,7 +872,6 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     });
     */
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -1174,10 +1188,9 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                 IconButton(
                   icon: const Icon(Icons.more_vert),
                     tooltip: 'Channel Guide',
-                    onPressed: widget.parent.showLineup,
+                    onPressed: widget.parent.showGuide,
                 ),
-
-                ],
+            ],
 
             bottom:
             PreferredSize(
@@ -1195,7 +1208,8 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
                         ),
                         Material(
                             type: MaterialType.transparency,
-                            textStyle: TextStyle(color: Colors.white,
+                            textStyle: TextStyle(
+                              color: Colors.white,
                               fontSize: 16.0,),
                             child: InkWell(
                                 onTap: () {},
@@ -1312,6 +1326,141 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
               ],
             ),
+          ),
+        );
+        break;
+
+    // CHANNEL GUIDE Screen
+      case 4:
+
+        LinkedHashMap _lineup = widget.parent.getChannelLineup();
+        String currentChannel = widget.parent.getCurrentChannel();
+        List aList = List<Widget>();
+        _lineup.forEach((aChannel, value) {
+          Color backgroundColor;
+          if (aChannel == currentChannel) {
+            backgroundColor = Colors.amber[50];
+          } else {
+            backgroundColor = Colors.white;
+          }
+
+          aList.add(
+              Container(
+                padding:
+                EdgeInsets.symmetric(
+                    vertical: 12.0,
+                    horizontal: 0.0),
+                margin: EdgeInsets.symmetric(vertical: 0.0),
+                decoration:
+                BoxDecoration(
+                  color: backgroundColor,
+                  borderRadius: BorderRadius.circular(6.0),
+                  border: Border.all(color: Colors.purple[50]),
+                ),
+                child:InkWell(
+                  onTap: () =>
+                  {
+                    widget.parent.selectChannel(aChannel)
+                  },
+                  child: Column(
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            Padding(
+                              padding: EdgeInsets.only(left: 12.0, right:6.0),
+                              child:
+                              Text(aChannel,
+                                style: TextStyle(
+                                  color: Colors.deepPurple[400],
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 28.0,
+                                ),),
+                            ),
+                            Expanded(
+                                child:
+                                Container(
+                                  margin: EdgeInsets.symmetric(horizontal: 12.0),
+                                  child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: <Widget>[
+                                        Text(
+                                          value['description'],
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 20.0,
+                                          ),
+                                        ),
+                                        Text(
+                                          '',
+                                          style: TextStyle(
+                                            fontSize: 6.0,
+                                          ),
+                                        ),
+                                        Text(
+                                          value['detail'],
+                                          overflow: TextOverflow.ellipsis,
+                                          maxLines: 3,
+                                          style: TextStyle(
+                                            fontSize: 16.0,
+                                          ),
+                                        ),
+                                      ]
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ]
+                  ),
+                ),
+              )
+          );
+
+        });
+
+        return Scaffold(
+          appBar: AppBar(
+            centerTitle: true,
+            backgroundColor: Colors.deepPurple,
+            title: Text('Channel Guide',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+                fontSize: 20.0,
+              ),
+            ),
+            bottom: PreferredSize(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(0.0, 0.0, 0.0, 12.0),
+                child: Text(
+                  "Your current channel is highlighted",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16.0,
+                  ),
+                ),
+              ),
+              preferredSize: Size(0.0, 20.0),
+            ),
+          ),
+          body: Padding(
+            padding: EdgeInsets.only(top: 20.0, left: 10.0, right: 10.0),
+            child:
+            CustomScrollView(
+              shrinkWrap: true,
+              slivers: <Widget>[
+                SliverPadding(
+                  padding: const EdgeInsets.all(0.0),
+                  sliver: SliverList(
+                    delegate: SliverChildListDelegate(
+                      aList,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
           ),
         );
         break;
