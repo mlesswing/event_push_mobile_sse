@@ -38,6 +38,7 @@ class PushApp extends StatelessWidget {
   final String _lastMessagePrefs = "lastMessage";
   final String _userKeyPrefs = "userKey";
   final String _urlPrefs = "url";
+
   final int notConnected = 0;
   final int awaitingLogin = 1;
   final int loggedIn = 2;
@@ -65,6 +66,7 @@ class PushApp extends StatelessWidget {
   String _lastChannel;
   String _subscriberId;
   LinkedHashMap _channelLineup = new LinkedHashMap();
+  LinkedHashMap _searchChannelLineup;
   int _lastMessage = 0;
   int _lastActivity = 0;
   String _longLifeKey;
@@ -216,10 +218,10 @@ class PushApp extends StatelessWidget {
   }
 
   void _lineup(List<Object> channels) {
+    _searchChannelLineup = null;
     _channelLineup = new LinkedHashMap();
     for (var i = 0; i < channels.length; i++) {
       Map<String, dynamic> aChannel = channels[i];
-      print(aChannel);
       _channelLineup[aChannel['channel_number']] = {
         'description': aChannel['channel_description'],
         'detail': aChannel['channel_detail']
@@ -259,7 +261,6 @@ class PushApp extends StatelessWidget {
   }
 
   void _processMessage(Map im) {
-
     switch (im['response']) {
       case 'INITIALIZE':
         _initialize( im['provider_name'],
@@ -273,6 +274,7 @@ class PushApp extends StatelessWidget {
         break;
 
       case 'LINEUP':
+        //print(im['channels']);
         _lineup(im['channels']);
         break;
 
@@ -282,6 +284,30 @@ class PushApp extends StatelessWidget {
 
       case 'LOGIN-ERROR':
         _loginError();
+        break;
+
+      case 'SEARCH-RESULT':
+        if (im['search_result'].length == 0) {
+          messageState.setConnectionState(loggedIn);
+          messageState.rebuild();
+        } else {
+          if (im['search_result'].length == 1) {
+            Map<String, dynamic> aChannel = im['search_result'][0];
+            _onRESTMessage('subscriber_request=CHANGE-CHANNEL&subscriber_id=' +
+                _subscriberId + '&channel_number=' + aChannel['channel_number']);
+          } else {
+            _searchChannelLineup = new LinkedHashMap();
+            for (var i = 0; i < im['search_result'].length; i++) {
+              Map<String, dynamic> aChannel = im['search_result'][i];
+              _searchChannelLineup[aChannel['channel_number']] = {
+                'description': aChannel['channel_description'],
+                'detail': aChannel['channel_detail']
+              };
+            }
+            messageState.setConnectionState(channelGuide);
+            messageState.rebuild();
+          }
+        }
         break;
 
       default:
@@ -294,14 +320,8 @@ class PushApp extends StatelessWidget {
   void _onRESTMessage(String aQuery) async {
     http.Response response;
     try {
-
-      //print('onRERTMessage');
-      //print(aQuery);
-      //print(_channelURL);
       response = await http.get(_channelURL + '?' + aQuery);
       if (response.body != '') {
-        //print('there');
-        //print(response.body);
         Map im = _decodeMessage(response.body);
         //
         // Before a side channel (SSE or Long Poll) is open, a "close" is sent
@@ -602,14 +622,28 @@ class PushApp extends StatelessWidget {
     return _currentChannel;
   }
 
+  void searchChannels(String searchString) {
+    if (searchString.length == 0) {
+      messageState.setConnectionState(loggedIn);
+      messageState.rebuild();
+    } else {
+      _onRESTMessage('subscriber_request=SEARCH-CHANNELS&subscriber_id=' +
+          _subscriberId + '&search_string=' + searchString);
+    }
+  }
+
   void selectChannel(String aChannel) {
-    print(_currentChannel);
-    if (aChannel != '') {
-      _clearLastMessage();
-      channelItems = List<ChannelItem>();
-      messageState.setChannelItems(channelItems);
-      _onRESTMessage('subscriber_request=CHANGE-CHANNEL&subscriber_id=' +
-          _subscriberId + '&channel_number=' + aChannel);
+    if (aChannel == _currentChannel) {
+      messageState.setConnectionState(loggedIn);
+      messageState.rebuild();
+    } else {
+      if (aChannel != '') {
+        _clearLastMessage();
+        channelItems = List<ChannelItem>();
+        messageState.setChannelItems(channelItems);
+        _onRESTMessage('subscriber_request=CHANGE-CHANNEL&subscriber_id=' +
+            _subscriberId + '&channel_number=' + aChannel);
+      }
     }
   }
 
@@ -619,6 +653,9 @@ class PushApp extends StatelessWidget {
   }
 
   LinkedHashMap getChannelLineup() {
+    if (_searchChannelLineup != null) {
+      return _searchChannelLineup;
+    }
     return _channelLineup;
   }
 
@@ -689,10 +726,12 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
   final TextEditingController _nameFilter = new TextEditingController();
   final TextEditingController _passwordFilter = new TextEditingController();
   final TextEditingController _portFilter = new TextEditingController();
+  final TextEditingController _searchFilter = new TextEditingController();
 
   String _host = "";
   String _name = "";
   String _password = "";
+  String _searchString = "";
   int _port = 433;
   int _ui_version = 0;
 
@@ -702,50 +741,39 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
     _nameFilter.addListener(_nameListen);
     _passwordFilter.addListener(_passwordListen);
     _portFilter.addListener(_portListen);
+    _searchFilter.addListener(_searchListen);
 
     KeyboardVisibilityNotification().addNewListener(
       onChange: (bool visible) {
-        if (widget.connectionState == 1) {
-          if (!visible) {
-            widget.parent.login(_name, _password);
-          }
-        }
-        if (widget.connectionState == 3) {
-          if (!visible) {
-            widget.parent.setURL(_host, _port);
-          }
+        switch (widget.connectionState) {
+
+        // LOGIN screen
+          case 1:
+            if (!visible) {
+              widget.parent.login(_name, _password);
+            }
+            break;
+
+        // PREFERENCES screen
+          case 3:
+            if (!visible) {
+              widget.parent.setURL(_host, _port);
+            }
+            break;
+
+        // CHANNEL GUIDE screen
+          case 4:
+            if (!visible) {
+              widget.parent.searchChannels(_searchString);
+            }
+            break;
+
         }
       },
     );
     aParent.registerMessageState(this);
     _ui_version = aParent.getUiVersion();
   }
-
-  /*
-  _MessagePageState() {
-
-    _hostFilter.addListener(_hostListen);
-    _nameFilter.addListener(_nameListen);
-    _passwordFilter.addListener(_passwordListen);
-    _portFilter.addListener(_portListen);
-
-    KeyboardVisibilityNotification().addNewListener(
-      onChange: (bool visible) {
-        if (widget.connectionState == 1) {
-          if (!visible) {
-            widget.parent.login(_name, _password);
-          }
-        }
-        if (widget.connectionState == 3) {
-          if (!visible) {
-            widget.parent.setURL(_host, _port);
-          }
-        }
-      },
-    );
-
-  }
-  */
 
   void rebuild() {
     setState(() {});
@@ -783,6 +811,14 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
       if (check != null) {
         _port = check;
       }
+    }
+  }
+
+  void _searchListen() {
+    if (_searchFilter.text.isEmpty) {
+      _searchString = "";
+    } else {
+      _searchString = _searchFilter.text;
     }
   }
 
@@ -1332,7 +1368,7 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
 
     // CHANNEL GUIDE Screen
       case 4:
-
+        _searchFilter.text = "";
         LinkedHashMap _lineup = widget.parent.getChannelLineup();
         String currentChannel = widget.parent.getCurrentChannel();
         List aList = List<Widget>();
@@ -1431,17 +1467,27 @@ class _MessagePageState extends State<MessagePage> with WidgetsBindingObserver {
               ),
             ),
             bottom: PreferredSize(
-              child: Padding(
+              child:
+              Padding(
                 padding: const EdgeInsets.fromLTRB(0.0, 0.0, 0.0, 12.0),
-                child: Text(
-                  "Your current channel is highlighted",
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16.0,
+                child:
+                Container(
+                  width: MediaQuery.of(context).size.width * 0.8,
+                  decoration: BoxDecoration(
+                    color: Colors.cyanAccent[100],
+                    borderRadius: BorderRadius.circular(6.0),
+                  ),
+                  child:
+                  TextField(
+                    controller: _searchFilter,
+                    decoration: InputDecoration(
+                      border: InputBorder.none,
+                      hintText: "Enter search terms",
+                    ),
                   ),
                 ),
               ),
-              preferredSize: Size(0.0, 20.0),
+              preferredSize: Size(0.0, 40.0),
             ),
           ),
           body: Padding(
